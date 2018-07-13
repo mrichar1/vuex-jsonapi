@@ -1,17 +1,36 @@
+import Vue from 'vue'
+
 function filterQueryString(obj) {
   return Object.keys(obj)
     .map(k => `filter[${k}]=${encodeURIComponent(obj[k])}`)
     .join('&');
 }
 
-const storeRecord = (records) => (newRecord) => {
-  const existingRecord = records.find(r => r.id === newRecord.id);
-  if (existingRecord) {
-    Object.assign(existingRecord, newRecord);
-  } else {
-    records.push(newRecord);
+const storeRecords = (records) => (newRecords) => {
+  const normRecords = normalize(newRecords)
+  for (let id in normRecords) {
+    Vue.set(records, id, normRecords[id]);
   }
 };
+
+const normalizeItem = (data) => {
+  let id = data['id']
+  delete data['id']
+  delete data['type']
+  return {[id]: data}
+}
+
+const normalize = (data) => {
+  const norm = {}
+  if (Array.isArray(data)) {
+    data.forEach(result => {
+      Object.assign(norm, normalizeItem(result))
+    })
+  } else {
+    norm = normalizeItem(data)
+  }
+  return norm
+}
 
 const getOptionsQuery = (optionsObject = {}) => (
   optionsObject.include ? `include=${optionsObject.include}` : ''
@@ -34,7 +53,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
     namespaced: true,
 
     state: {
-      records: [],
+      records: {},
       related: [],
       filtered: [],
     },
@@ -48,16 +67,10 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
         state.related = related;
       },
 
-      STORE_RECORD: (state, newRecord) => {
+      STORE_RECORDS: (state, newRecord) => {
         const { records } = state;
 
-        storeRecord(records)(newRecord);
-      },
-
-      STORE_RECORDS: (state, newRecords) => {
-        const { records } = state;
-
-        newRecords.forEach(storeRecord(records));
+        storeRecords(records)(newRecord);
       },
 
       STORE_RELATED: (state, parent) => {
@@ -76,7 +89,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
       },
 
       REMOVE_RECORD: (state, record) => {
-        state.records = state.records.filter(r => r.id !== record.id);
+        delete state.records[record.id];
       },
     },
 
@@ -93,7 +106,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
         const url = `${resourceUrl(id)}?${getOptionsQuery(options)}`;
         return api.get(url)
           .then(results => {
-            commit('STORE_RECORD', results.data.data);
+            commit('STORE_RECORDS', results.data.data)
           });
       },
 
@@ -134,7 +147,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
         };
         return api.post(collectionUrl, requestBody)
           .then(result => {
-            commit('STORE_RECORD', result.data.data);
+            commit('STORE_RECORDS', result.data.data);
           });
       },
 
@@ -142,7 +155,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
         // http://jsonapi.org/faq/#wheres-put
         return api.patch(resourceUrl(record.id), record)
           .then(() => {
-            commit('STORE_RECORD', record);
+            commit('STORE_RECORDS', record);
           });
       },
 
@@ -156,7 +169,7 @@ const resourceStore = ({ name: resourceName, httpClient: api }) => {
 
     getters: {
       all: state => state.records,
-      find: state => id => state.records.find(r => r.id === id),
+      find: state => id => ({[id]: state.records[id]}),
       where: state => filter => {
         const matchesRequestedFilter = matches(filter);
         const entry = state.filtered.find(({ filter: testFilter }) => (
